@@ -1,0 +1,11 @@
+# data and outputs
+data/processed/
+results/figures/*
+results/tables/*
+*.log
+.DS_Store
+.ipynb_checkpoints/
+.Rhistory
+.Rproj.user/
+.env
+__pycache__/
