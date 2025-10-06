@@ -21,26 +21,26 @@
 ###############################################################################
 # Helper: install packages if missing
 ###############################################################################
-install_if_missing <- function(pkgs, bioc = FALSE) {
-  for (p in pkgs) {
-    if (!requireNamespace(p, quietly = TRUE)) {
-      if (bioc) {
-        if (!requireNamespace("BiocManager", quietly = TRUE)) {
-          install.packages("BiocManager")
-        }
-        BiocManager::install(p, ask = FALSE, update = FALSE)
-      } else {
-        install.packages(p, repos = "https://cloud.r-project.org")
-      }
-    }
-  }
-}
+#install_if_missing <- function(pkgs, bioc = FALSE) {
+#  for (p in pkgs) {
+#    if (!requireNamespace(p, quietly = TRUE)) {
+#      if (bioc) {
+#        if (!requireNamespace("BiocManager", quietly = TRUE)) {
+#          install.packages("BiocManager")
+#        }
+#        BiocManager::install(p, ask = FALSE, update = FALSE)
+#      } else {
+#        install.packages(p, repos = "https://cloud.r-project.org")
+#      }
+#    }
+#  }
+#}
 
 # CRAN packages
-install_if_missing(c("ggplot2", "data.table", "dplyr"))
+#install_if_missing(c("ggplot2", "data.table", "dplyr"))
 
 # Bioconductor packages
-install_if_missing(c("GEOquery", "limma", "fgsea", "msigdbr"), bioc = TRUE)
+#install_if_missing(c("GEOquery", "limma", "fgsea", "msigdbr"), bioc = TRUE)
 
 ###############################################################################
 # Load libraries
@@ -122,9 +122,9 @@ fwrite(de_results, file.path(tables_dir, "GSE13355_DE_results.csv"))
 ###############################################################################
 message(">>> Creating volcano plot...")
 
-if (!requireNamespace("BiocManager", quietly = TRUE))
-install.packages("BiocManager")
-BiocManager::install("hgu133plus2.db")
+#if (!requireNamespace("BiocManager", quietly = TRUE))
+#install.packages("BiocManager")
+#BiocManager::install("hgu133plus2.db")
 
 library(ggrepel)
 library(hgu133plus2.db)
@@ -281,118 +281,273 @@ fgsea_r <- fgsea(pathways = reactome, stats = ranks, nperm = 1000)
 # 5.5 Save results
 fwrite(fgsea_h, file.path(tables_dir, "GSE13355_GSEA_hallmark.csv"))
 fwrite(fgsea_r, file.path(tables_dir, "GSE13355_GSEA_reactome.csv"))
-###############################################################################
-# Step 5b (alternative): Classic multi-panel GSEA enrichment plots
-###############################################################################
-message(">>> Creating Broad Institute–style enrichment plots...")
 
-library(patchwork)   # for arranging multiple plots
+###############################################################################
+# Step 5b: GSEA Visualization (Bubble + Bar Plot Versions)
+###############################################################################
+message(">>> Creating GSEA bubble and bar plots...")
+
 library(ggplot2)
+library(dplyr)
 library(stringr)
 
-# Pick the top 3 pathways by FDR and |NES|
+# Prepare top 10 enriched pathways
+top_pathways <- fgsea_h %>%
+  arrange(padj, desc(abs(NES))) %>%
+  slice_head(n = 10) %>%
+  mutate(
+    GeneRatio = leadingEdge %>% sapply(length) / size,
+    Count = sapply(leadingEdge, length),
+    pathway_clean = gsub("^HALLMARK_", "", pathway),
+    pathway_clean = gsub("_", " ", pathway_clean),
+    pathway_clean = str_to_title(pathway_clean),
+    pathway_clean = str_wrap(pathway_clean, width = 25),
+    pathway_clean = factor(pathway_clean, levels = rev(unique(pathway_clean)))
+  )
+
+# ---------------------------------------------------------------------------
+# 1️⃣ Bubble (dot) plot — similar to enrichplot::dotplot style
+# ---------------------------------------------------------------------------
+bubble_plot <- ggplot(top_pathways, aes(x = GeneRatio, y = pathway_clean)) +
+  geom_point(aes(size = Count, color = padj)) +
+  scale_color_gradient(low = "red", high = "blue", name = "FDR q-value") +
+  scale_size(range = c(3, 10), name = "Gene Count") +
+  theme_bw(base_size = 14) +
+  labs(
+    title = "Top 10 Enriched Hallmark Pathways",
+    subtitle = "Lesional vs Non-lesional (Psoriasis)\nColor = FDR; Size = Gene Count",
+    x = "Gene Ratio (Leading Edge / Pathway Size)",
+    y = "Pathway"
+  ) +
+  theme(
+    plot.title = element_text(face = "bold", size = 15),
+    plot.subtitle = element_text(size = 11, color = "grey30"),
+    legend.position = "right"
+  )
+
+print(bubble_plot)
+ggsave(file.path(figures_dir, "GSE13355_GSEA_bubble_plot.png"),
+       bubble_plot, width = 8, height = 6, dpi = 600)
+
+# ---------------------------------------------------------------------------
+# 2️⃣ Horizontal bar plot — like KEGG/clusterProfiler style
+# ---------------------------------------------------------------------------
+bar_plot <- ggplot(top_pathways, aes(x = Count, y = pathway_clean, fill = padj)) +
+  geom_bar(stat = "identity") +
+  scale_fill_gradient(low = "red", high = "blue", name = "FDR q-value") +
+  theme_bw(base_size = 14) +
+  labs(
+    title = "Top 10 Enriched Hallmark Pathways",
+    subtitle = "Lesional vs Non-lesional (Psoriasis)\nColor = FDR q-value",
+    x = "Gene Count (Leading Edge)",
+    y = "Pathway"
+  ) +
+  theme(
+    plot.title = element_text(face = "bold", size = 15),
+    plot.subtitle = element_text(size = 11, color = "grey30"),
+    legend.position = "right"
+  )
+
+print(bar_plot)
+ggsave(file.path(figures_dir, "GSE13355_GSEA_bar_plot.png"),
+       bar_plot, width = 8, height = 6, dpi = 600)
+
+
+# ---------------------------------------------------------------------------
+#  DOT (BUBBLE) PLOT — Compact Visualization of Enrichment Results
+# ---------------------------------------------------------------------------
+# What this plot shows:
+#   - Summarizes the same top 10 enriched Hallmark pathways but adds more information per point.
+#   - Each dot = one pathway.
+#   - Dot size = number of genes contributing to enrichment (Leading Edge Count).
+#   - Dot color = FDR-adjusted significance (q-value).
+#   - X-axis = Gene Ratio = (Leading Edge genes) / (Total genes in pathway),
+#               showing the *proportion* of a pathway involved in enrichment.
+#
+# Why we did this:
+#   - The dot plot integrates *magnitude* (gene ratio), *significance* (FDR),
+#     and *gene count* (dot size) in a single view.
+#   - This allows easy comparison of enrichment intensity and significance across pathways.
+#   - It’s especially useful for presentations and publications to convey both
+#     scale and statistical weight at once.
+#
+# How to interpret:
+#   - Bigger and darker dots = stronger, more significant enrichment.
+#   - Pathways clustered near higher Gene Ratios have a large fraction of their genes
+#     contributing to the enrichment signal.
+#   - Consistent with the bar plot, "E2F Targets", "MYC Targets V1", and
+#     "Interferon Alpha Response" dominate, showing that these biological processes
+#     are both statistically significant and gene-rich.
+#
+# Psoriasis-specific biological meaning:
+#   - High Gene Ratios in E2F and MYC pathways reinforce widespread activation of
+#     proliferation programs in psoriatic lesions.
+#   - Interferon signaling enrichment highlights chronic immune stimulation.
+#   - These processes collectively capture the dual proliferative–immune nature
+#     of psoriatic skin inflammation.
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+#  BAR PLOT — Top 10 Enriched Hallmark Pathways
+# ---------------------------------------------------------------------------
+# What this plot shows:
+#   - Displays the top 10 most significantly enriched Hallmark pathways (from fgsea_h).
+#   - Each horizontal bar represents one pathway.
+#   - Bar length corresponds to the "Leading Edge Gene Count" — the number of genes
+#     driving that pathway’s enrichment.
+#   - Color (magenta gradient) represents the adjusted FDR q-value; darker shades
+#     indicate more statistically significant pathways.
+#
+# Why we did this:
+#   - The bar plot provides a *straightforward summary* of enrichment results.
+#   - It allows us to visually rank biological pathways by both significance and gene involvement.
+#   - This gives a quick overview of which cellular processes dominate the differential signal
+#     between Lesional and Non-lesional psoriasis skin samples.
+#
+# How to interpret:
+#   - Pathways with longer bars and darker color are more significantly enriched.
+#   - For example, "E2F Targets" and "MYC Targets V1" are highly enriched and contain
+#     large sets of contributing genes.
+#   - These pathways represent:
+#       • Cell-cycle and proliferation genes (E2F Targets)
+#       • Transcriptional and metabolic upregulation (MYC Targets)
+#       • Immune signaling (Interferon Alpha/Gamma Response)
+#       • Growth and metabolic control (mTORC1 Signaling, Oxidative Phosphorylation)
+#
+# Psoriasis-specific biological meaning:
+#   - Lesional psoriasis tissue shows elevated keratinocyte proliferation and
+#     strong activation of immune and interferon pathways.
+#   - This plot visually confirms that proliferative and immune responses dominate
+#     the transcriptomic signature of psoriatic lesions.
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Enrichment plots for Top 3 pathways (Broad Institute–style multi-panel)
+# ---------------------------------------------------------------------------
+message(">>> Creating Broad Institute–style enrichment plots...")
+
+library(patchwork)
+library(stringr)
+library(dplyr)
+library(fgsea)
+library(ggplot2)
+
+# Select top 3 most significant Hallmark pathways
 top3 <- fgsea_h %>%
   arrange(padj, desc(abs(NES))) %>%
   slice_head(n = 3)
 
-# Function to make a styled enrichment plot
+# ---------------------------------------------------------------------------
+# Improved Broad Institute–style enrichment plot function (final)
+# ---------------------------------------------------------------------------
 make_enrichment_plot <- function(pathway_name, ranks, pathways_list,
                                  up_label = "Lesional (up)",
                                  down_label = "Non-lesional (down)") {
+  gene_ranks <- ranks
+  pathway_genes <- pathways_list[[pathway_name]]
   
-  df <- plotEnrichment(pathways_list[[pathway_name]], ranks) %>%
-    ggplot_build() %>% .$data[[1]]
+  # Identify pathway gene positions
+  hits <- which(names(gene_ranks) %in% pathway_genes)
+  hits <- sort(hits)
   
-  # Running enrichment score curve
-  p <- ggplot(df, aes(x, y)) +
-    geom_line(color = "forestgreen", linewidth = 1) +
-    geom_hline(yintercept = 0, color = "grey40") +
-    theme_bw(base_size = 12) +
+  # Compute running enrichment score
+  N <- length(gene_ranks)
+  Nh <- length(hits)
+  Phit <- cumsum(ifelse(seq_len(N) %in% hits, abs(gene_ranks[seq_len(N)])^1, 0))
+  Phit <- Phit / sum(abs(gene_ranks[hits])^1)
+  Pmiss <- cumsum(ifelse(seq_len(N) %in% hits, 0, 1 / (N - Nh)))
+  runningES <- Phit - Pmiss
+  enrichment_df <- data.frame(Position = seq_along(runningES), ES = runningES)
+  
+  # Build publication-style plot
+  p <- ggplot(enrichment_df, aes(x = Position, y = ES)) +
+    geom_line(color = "#009E73", linewidth = 1) +  # green curve
+    geom_segment(
+      data = data.frame(x = hits),
+      aes(x = x, xend = x, y = 0, yend = 0.05),
+      color = "black", linewidth = 0.25, inherit.aes = FALSE
+    ) +
+    geom_hline(yintercept = 0, color = "grey40", linetype = "dashed") +
     labs(
-      title = paste0("Enrichment Plot: ",
-                     str_to_title(gsub("_", " ",
-                                       gsub("^HALLMARK_", "", pathway_name)))),
+      title = paste0(
+        "Enrichment Plot: ",
+        str_to_title(gsub("_", " ", gsub("^HALLMARK_", "", pathway_name)))
+      ),
       x = "Rank in Ordered Dataset",
       y = "Enrichment Score (ES)"
     ) +
+    annotate("text", x = N * 0.98, y = max(enrichment_df$ES) * 0.9,
+             label = up_label, hjust = 1, vjust = 0, size = 3.8, color = "#D55E00") +
+    annotate("text", x = N * 0.98, y = min(enrichment_df$ES) * 0.9,
+             label = down_label, hjust = 1, vjust = 1, size = 3.8, color = "#0072B2") +
+    theme_minimal(base_size = 12) +
     theme(
-      plot.title = element_text(face = "bold", size = 12, hjust = 0.5),
+      plot.title = element_text(face = "bold", size = 13, hjust = 0.5),
       axis.title.x = element_text(size = 11),
-      axis.title.y = element_text(size = 11)
+      axis.title.y = element_text(size = 11),
+      panel.grid.minor = element_blank(),
+      panel.grid.major = element_line(color = "grey85"),
+      axis.line = element_line(color = "black", linewidth = 0.3)
     )
-  
-  # Add labels for up/down phenotypes
-  p <- p +
-    annotate("text", x = Inf, y = max(df$y) * 0.9, label = up_label,
-             hjust = 1.1, vjust = 1.5, size = 3.5, color = "red") +
-    annotate("text", x = Inf, y = min(df$y) * 0.9, label = down_label,
-             hjust = 1.1, vjust = -0.5, size = 3.5, color = "blue")
   
   return(p)
 }
 
-# Generate the three plots
+# ---------------------------------------------------------------------------
+# Generate plots and save combined output
+# ---------------------------------------------------------------------------
 plots <- lapply(top3$pathway, make_enrichment_plot,
                 ranks = ranks, pathways_list = hallmark)
 
-# Combine into a single multi-panel layout
+# Match y-axis across all for comparability
+common_ylim <- range(unlist(lapply(plots, function(p) ggplot_build(p)$data[[1]]$y)))
+plots <- lapply(plots, function(p) p + ylim(common_ylim))
+
+# Combine plots (2-column layout)
 combined_plot <- wrap_plots(plots, ncol = 2)
 
-# Save as PDF and PNG
-ggsave(file.path(figures_dir, "GSE13355_GSEA_top3_enrichment_classic.pdf"),
+# Ensure output directory exists
+if (!dir.exists(figures_dir)) dir.create(figures_dir, recursive = TRUE)
+
+# Save combined figure
+ggsave(file.path(figures_dir, "GSE13355_GSEA_top3_enrichment_classic_f.png"),
        combined_plot, width = 10, height = 6, dpi = 600)
-ggsave(file.path(figures_dir, "GSE13355_GSEA_top3_enrichment_classic.png"),
-       combined_plot, width = 10, height = 6, dpi = 600)
 
-###############################################################################
-
-
+message(">>> Classic enrichment plots saved successfully.")
 # ---------------------------------------------------------------------------
-# Enrichment plots for Top 3 pathways
+# 🔹 ENRICHMENT CURVE PLOTS — Detailed View for Top 3 Pathways
 # ---------------------------------------------------------------------------
-message(">>> Creating enrichment plots for top 3 pathways...")
-
-# Get top 3 pathways by padj + |NES|
-top3 <- fgsea_h %>%
-  arrange(padj, desc(abs(NES))) %>%
-  slice_head(n = 3)
-
-# Save combined into PDF
-pdf(file.path(figures_dir, "GSE13355_GSEA_top3_enrichment.pdf"), width = 7, height = 5)
-for (p in top3$pathway) {
-  p_title <- gsub("^HALLMARK_", "", p) %>%
-    gsub("_", " ", .) %>%
-    str_to_title()
-  print(
-    plotEnrichment(hallmark[[p]], ranks) +
-      labs(title = paste0("Enrichment Plot: ", p_title)) +
-      theme_bw(base_size = 12) +
-      theme(
-        plot.title = element_text(face = "bold", size = 13, hjust = 0.5),
-        axis.title.x = element_text(size = 11),
-        axis.title.y = element_text(size = 11)
-      )
-  )
-}
-dev.off()
-print(top3)
-
-# Save individually as PNGs too
-for (p in top3$pathway) {
-  p_title <- gsub("^HALLMARK_", "", p) %>%
-    gsub("_", " ", .) %>%
-    str_to_title()
-  
-  p_plot <- plotEnrichment(hallmark[[p]], ranks) +
-    labs(title = paste0("Enrichment Plot: ", p_title)) +
-    theme_bw(base_size = 12) +
-    theme(
-      plot.title = element_text(face = "bold", size = 13, hjust = 0.5),
-      axis.title.x = element_text(size = 11),
-      axis.title.y = element_text(size = 11)
-    )
-  
-  ggsave(file.path(figures_dir, paste0("GSE13355_GSEA_", p_title, ".png")),
-         p_plot, width = 7, height = 5, dpi = 600)
-}
-###############################################################################
+# What these plots show:
+#   - Each panel shows the running Enrichment Score (ES) for one top Hallmark pathway.
+#   - The green line shows the running sum of enrichment as we move through all genes
+#     ranked by differential expression (lesional vs non-lesional).
+#   - Black tick marks represent genes from that pathway along the ranked list.
+#   - The grey dashed line at ES = 0 separates up- and down-regulated regions.
+#   - “Lesional (up)” and “Non-lesional (down)” annotations mark the direction
+#     of enrichment for clarity.
+#
+# Why we did this:
+#   - These enrichment plots are the *core diagnostic output* of GSEA.
+#   - They show *where* in the ranked list the pathway genes occur — concentrated
+#     at the top (upregulated) or bottom (downregulated).
+#   - This visualization is essential to validate that the enrichment signal
+#     is not random but driven by coordinated gene behavior.
+#
+# How to interpret:
+#   - A curve peaking *above 0* → pathway enriched in Lesional samples (positive NES).
+#   - A curve dipping *below 0* → pathway enriched in Non-lesional samples (negative NES).
+#   - The more extreme the peak, the stronger the enrichment.
+#
+# Pathway-specific findings:
+#   1. E2F Targets → Strong positive ES: over-activation of cell cycle and replication.
+#   2. MYC Targets V1 → Positive ES: transcriptional upregulation via MYC signaling.
+#   3. Interferon Alpha Response → Positive ES: immune activation and antiviral response.
+#
+# Psoriasis-specific biological meaning:
+#   - Lesional skin is marked by rapid epidermal turnover (E2F/MYC) and immune activation
+#     (interferon pathways), confirming known pathogenic signatures.
+#   - Together, these plots visually confirm that psoriasis combines both
+#     hyperproliferation and chronic inflammation at the molecular level.
+# ---------------------------------------------------------------------------
