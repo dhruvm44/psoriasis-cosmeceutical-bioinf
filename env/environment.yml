@@ -5,18 +5,6 @@ channels:
 dependencies:
   - python=3.11
   - pip
-  - r-base=4.3
-  - r-essentials
-  - r-tidyverse
-  - r-limma
-  - r-edgeR
-  - r-deseq2
-  - r-fgsea
-  - r-biocmanager
-  - r-ggplot2
-  - r-data.table
-  - r-readr
-  - r-optparse
   - pandas
   - numpy
   - scipy
@@ -27,5 +15,5 @@ dependencies:
   - networkx
   - rdkit
   - pip:
-      - gseapy
-      - mygene
+    - gseapy
+    - mygene
