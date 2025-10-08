@@ -517,7 +517,7 @@ ggsave(file.path(figures_dir, "GSE13355_GSEA_top3_enrichment_classic_f.png"),
 
 message(">>> Classic enrichment plots saved successfully.")
 # ---------------------------------------------------------------------------
-# 🔹 ENRICHMENT CURVE PLOTS — Detailed View for Top 3 Pathways
+#  ENRICHMENT CURVE PLOTS — Detailed View for Top 3 Pathways
 # ---------------------------------------------------------------------------
 # What these plots show:
 #   - Each panel shows the running Enrichment Score (ES) for one top Hallmark pathway.
